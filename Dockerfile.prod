@@ -1,0 +1,77 @@
+# syntax=docker/dockerfile:1.7
+
+# --- BASE ARGUMENTS ---
+ARG OPENCLAW_EXTENSIONS=""
+ARG OPENCLAW_VARIANT=default
+ARG OPENCLAW_DOCKER_APT_UPGRADE=1
+ARG OPENCLAW_NODE_BOOKWORM_IMAGE="node:24-bookworm@sha256:3a09aa6354567619221ef6c45a5051b671f953f0a1924d1f819ffb236e520e6b"
+ARG OPENCLAW_NODE_BOOKWORM_DIGEST="sha256:3a09aa6354567619221ef6c45a5051b671f953f0a1924d1f819ffb236e520e6b"
+
+# --- Stage 1: Build & Assets (Standard Official Flow) ---
+FROM ${OPENCLAW_NODE_BOOKWORM_IMAGE} AS build
+RUN curl --retry 5 -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+RUN corepack enable
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY ui/package.json ./ui/package.json
+COPY patches ./patches
+RUN --mount=type=cache,id=openclaw-pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked \
+    NODE_OPTIONS=--max-old-space-size=2048 pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm build:docker
+ENV OPENCLAW_PREFER_PNPM=1
+RUN pnpm ui:build
+RUN CI=true pnpm prune --prod && \
+    find dist -type f \( -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' -o -name '*.map' \) -delete
+
+# --- Stage 2: Custom Tools Builder (wacli) ---
+FROM golang:1.23-bookworm AS wacli-builder
+RUN apt-get update && apt-get install -y git sqlite3 libsqlite3-dev
+RUN git clone https://github.com/steipete/wacli.git /tmp/wacli && \
+    cd /tmp/wacli && \
+    go build -tags sqlite_fts5 -o /usr/local/bin/wacli ./cmd/wacli
+
+# --- Stage 3: Final Runtime (Clean & Hardened) ---
+FROM ${OPENCLAW_NODE_BOOKWORM_IMAGE}
+WORKDIR /app
+
+# 1. Install System Utils + Custom Deps
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    procps hostname curl git lsof openssl sqlite3 ca-certificates gnupg python3-pip python3-full tesseract-ocr jq ffmpeg rclone pandoc && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 2. Install Tailscale
+RUN curl -fsSL https://tailscale.com/install.sh | sh
+
+# 3. Copy wacli from builder
+COPY --from=wacli-builder /usr/local/bin/wacli /usr/local/bin/wacli
+
+# 4. Install Global NPM tools (gws)
+RUN npm install -g @googleworkspace/cli
+
+# 5. Install Python tools (notebooklm-mcp-cli)
+RUN pip install --break-system-packages notebooklm-mcp-cli
+
+# 6. Copy OpenClaw App Assets
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/package.json .
+COPY --from=build --chown=node:node /app/openclaw.mjs .
+COPY --from=build --chown=node:node /app/extensions ./extensions
+COPY --from=build --chown=node:node /app/skills ./skills
+COPY --from=build --chown=node:node /app/docs ./docs
+
+# 7. Final Configuration
+RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw && chmod 755 /app/openclaw.mjs
+ENV NODE_ENV=production
+ENV OPENCLAW_BUNDLED_PLUGINS_DIR=/app/extensions
+
+# 8. User Switch (Security Hardening)
+USER node
+
+HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "openclaw.mjs", "gateway", "--allow-unconfigured", "--bind", "lan"]
