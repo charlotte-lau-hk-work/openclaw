@@ -30,6 +30,7 @@ FROM golang:1.24-bookworm AS wacli-builder
 RUN apt-get update && apt-get install -y git sqlite3 libsqlite3-dev
 RUN git clone https://github.com/steipete/wacli.git /tmp/wacli && \
     cd /tmp/wacli && \
+    sed -i 's/go 1.25.0/go 1.24.0/' go.mod && \
     go build -tags sqlite_fts5 -o /usr/local/bin/wacli ./cmd/wacli
 
 # --- Stage 3: Final Runtime (Clean & Hardened) ---
