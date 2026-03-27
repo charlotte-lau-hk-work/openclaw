@@ -1,13 +1,14 @@
-name: Build and Push VPS Image
+name: Build Custom n8n Image
 
 on:
   push:
-    branches: ["main"]
+    paths:
+      - 'n8n/Dockerfile.custom'
+      - '.github/workflows/n8n-custom-image.yml'
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
@@ -20,6 +21,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -30,12 +34,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push n8n image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./n8n
+          file: ./n8n/Dockerfile.custom
           push: true
-          platforms: linux/arm64
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          build-args: |
-            OPENCLAW_DOCKER_APT_PACKAGES=curl gpg pandoc ffmpeg rclone sqlite3 tesseract-ocr jq tailscale python3-pip python3-docx
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/n8n-custom:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

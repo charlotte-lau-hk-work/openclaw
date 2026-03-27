@@ -1,0 +1,23 @@
+services:
+  n8n:
+    image: ghcr.io/charlotte-lau-hk-work/n8n-custom:latest
+    container_name: n8n
+    restart: always
+    user: "1001:2000"
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - NODE_ENV=production
+      - TZ=Asia/Hong_Kong
+      - GENERIC_TIMEZONE=Asia/Hong_Kong
+      - WEBHOOK_URL=http://n8n:5678/
+    volumes:
+      - /home/openclaw/n8n/n8n_data:/home/node/.n8n
+      - /home/openclaw/openclaw-shared-volume:/home/node/shared
+    networks:
+      - ai_network
+
+networks:
+  ai_network:
+    external: true
