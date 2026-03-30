@@ -19,6 +19,12 @@ COPY patches ./patches
 RUN --mount=type=cache,id=openclaw-pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked \
     NODE_OPTIONS=--max-old-space-size=2048 pnpm install --frozen-lockfile
 COPY . .
+RUN pnpm canvas:a2ui:bundle || \
+    (echo "A2UI bundle: creating stub (non-fatal)" && \
+     mkdir -p src/canvas-host/a2ui && \
+     echo "/* A2UI bundle unavailable in this build */" > src/canvas-host/a2ui/a2ui.bundle.js && \
+     echo "stub" > src/canvas-host/a2ui/.bundle.hash && \
+     rm -rf vendor/a2ui apps/shared/OpenClawKit/Tools/CanvasA2UI)
 RUN pnpm build:docker
 ENV OPENCLAW_PREFER_PNPM=1
 RUN pnpm ui:build
@@ -30,6 +36,7 @@ FROM golang:1.26-alpine AS wacli-builder
 RUN apk add --no-cache git sqlite-dev build-base
 RUN git clone https://github.com/steipete/wacli.git /tmp/wacli && \
     cd /tmp/wacli && \
+    go mod tidy && \
     go build -tags sqlite_fts5 -o /usr/local/bin/wacli ./cmd/wacli
 
 # --- Stage 3: Final Runtime (Clean & Hardened) ---
