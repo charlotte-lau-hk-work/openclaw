@@ -250,6 +250,10 @@ RUN set -eux; \
     chmod +x /usr/local/bin/gh && \
     rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${ARCH}"
 
+# python-docx — Python library for reading/writing .docx files
+# Not available as an apt package; installed via pip after python3-pip apt install.
+RUN pip3 install --no-cache-dir --break-system-packages python-docx
+
 # Optionally install Chromium and Xvfb for browser automation.
 # Build with: docker build --build-arg OPENCLAW_INSTALL_BROWSER=1 ...
 # Adds ~300MB but eliminates the 60-90s Playwright install on every container start.
