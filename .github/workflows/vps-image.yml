@@ -41,6 +41,6 @@ jobs:
           platforms: linux/arm64
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           build-args: |
-            OPENCLAW_DOCKER_APT_PACKAGES=curl gpg pandoc ffmpeg rclone sqlite3 tesseract-ocr jq tailscale python3-pip python3-docx
+            OPENCLAW_DOCKER_APT_PACKAGES=gpg wget pandoc ffmpeg rclone sqlite3 tesseract-ocr tesseract-ocr-chi-tra tesseract-ocr-chi-sim jq tailscale python3-pip python3-docx poppler-utils imagemagick
           cache-from: type=gha
           cache-to: type=gha,mode=max

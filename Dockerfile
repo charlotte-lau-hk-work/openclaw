@@ -199,6 +199,57 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $OPENCLAW_DOCKER_APT_PACKAGES; \
     fi
 
+# ── Custom skill binaries ────────────────────────────────────────
+# Tools required by installed skills that are not available via APT.
+# Installed as root before USER node handoff.
+
+# gws — Google Workspace CLI (@googleworkspace/cli)
+# https://github.com/googleworkspace/cli
+RUN npm install -g @googleworkspace/cli
+
+# obsidian-cli — Obsidian vault CLI (required by the obsidian skill)
+# https://github.com/yakitrak/obsidian-cli
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    OBSIDIAN_VERSION="$(curl -fsSL https://api.github.com/repos/yakitrak/obsidian-cli/releases/latest \
+      | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')"; \
+    curl -fsSL \
+      "https://github.com/yakitrak/obsidian-cli/releases/download/v${OBSIDIAN_VERSION}/obsidian-cli_${OBSIDIAN_VERSION}_linux_${ARCH}.tar.gz" \
+      -o /tmp/obsidian-cli.tar.gz && \
+    tar -xzf /tmp/obsidian-cli.tar.gz -C /usr/local/bin obsidian-cli && \
+    chmod +x /usr/local/bin/obsidian-cli && \
+    rm /tmp/obsidian-cli.tar.gz
+
+# uv — fast Python package manager (https://github.com/astral-sh/uv)
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "$ARCH" in \
+      arm64) UV_TARGET="aarch64-unknown-linux-gnu" ;; \
+      amd64) UV_TARGET="x86_64-unknown-linux-gnu" ;; \
+      *) echo "Unsupported architecture: $ARCH" && exit 1 ;; \
+    esac; \
+    curl -fsSL \
+      "https://github.com/astral-sh/uv/releases/latest/download/uv-${UV_TARGET}.tar.gz" \
+      -o /tmp/uv.tar.gz && \
+    tar -xzf /tmp/uv.tar.gz -C /tmp && \
+    mv "/tmp/uv-${UV_TARGET}/uv" /usr/local/bin/uv && \
+    mv "/tmp/uv-${UV_TARGET}/uvx" /usr/local/bin/uvx && \
+    chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
+    rm -rf /tmp/uv.tar.gz "/tmp/uv-${UV_TARGET}"
+
+# gh — GitHub CLI (https://github.com/cli/cli)
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    GH_VERSION="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest \
+      | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')"; \
+    curl -fsSL \
+      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
+      -o /tmp/gh.tar.gz && \
+    tar -xzf /tmp/gh.tar.gz -C /tmp && \
+    mv "/tmp/gh_${GH_VERSION}_linux_${ARCH}/bin/gh" /usr/local/bin/gh && \
+    chmod +x /usr/local/bin/gh && \
+    rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${ARCH}"
+
 # Optionally install Chromium and Xvfb for browser automation.
 # Build with: docker build --build-arg OPENCLAW_INSTALL_BROWSER=1 ...
 # Adds ~300MB but eliminates the 60-90s Playwright install on every container start.
