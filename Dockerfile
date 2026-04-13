@@ -189,6 +189,17 @@ RUN install -d -m 0755 "$COREPACK_HOME" && \
     done && \
     chmod -R a+rX "$COREPACK_HOME"
 
+# Add Tailscale apt repository (required before OPENCLAW_DOCKER_APT_PACKAGES
+# installs tailscale, which is not in the standard Debian bookworm repos).
+RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl && \
+    curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+      -o /usr/share/keyrings/tailscale-archive-keyring.gpg && \
+    curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+      -o /etc/apt/sources.list.d/tailscale.list
+
 # Install additional system packages needed by your skills or extensions.
 # Example: docker build --build-arg OPENCLAW_DOCKER_APT_PACKAGES="python3 wget" .
 ARG OPENCLAW_DOCKER_APT_PACKAGES=""
