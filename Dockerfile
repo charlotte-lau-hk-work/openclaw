@@ -254,6 +254,15 @@ RUN set -eux; \
 # Not available as an apt package; installed via pip after python3-pip apt install.
 RUN pip3 install --no-cache-dir --break-system-packages python-docx
 
+# VNC client tools — for agent-driven browser automation over VNC
+# vncsnapshot: captures a PNG screenshot from a VNC server
+# vncdotool:   sends keyboard/mouse events to a VNC server (vncdo command)
+RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends vncsnapshot
+RUN pip3 install --no-cache-dir --break-system-packages vncdotool
+
 # Optionally install Chromium and Xvfb for browser automation.
 # Build with: docker build --build-arg OPENCLAW_INSTALL_BROWSER=1 ...
 # Adds ~300MB but eliminates the 60-90s Playwright install on every container start.
