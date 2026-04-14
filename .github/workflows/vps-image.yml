@@ -43,5 +43,9 @@ jobs:
           build-args: |
             OPENCLAW_DOCKER_APT_PACKAGES=gpg wget pandoc ffmpeg rclone sqlite3 tesseract-ocr tesseract-ocr-chi-tra tesseract-ocr-chi-sim jq tailscale python3-pip poppler-utils imagemagick
             OPENCLAW_INSTALL_BROWSER=1
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: |
+            type=gha,mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
