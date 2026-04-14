@@ -218,19 +218,21 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
 # https://github.com/googleworkspace/cli
 RUN npm install -g @googleworkspace/cli
 
-# obsidian-cli — Obsidian vault CLI (required by the obsidian skill)
-# https://github.com/yakitrak/obsidian-cli
+# notesmd-cli (formerly obsidian-cli) — Obsidian vault CLI (required by the obsidian skill)
+# Repo renamed from yakitrak/obsidian-cli to Yakitrak/notesmd-cli at v0.3.4.
+# A symlink obsidian-cli → notesmd-cli preserves backwards compatibility with the skill.
 # Version pinned to avoid unauthenticated GitHub API rate-limit failures in CI.
-# To upgrade: update OBSIDIAN_CLI_VERSION to the new tag.
-ARG OBSIDIAN_CLI_VERSION="0.3.4"
+# To upgrade: update NOTESMD_CLI_VERSION to the new tag.
+ARG NOTESMD_CLI_VERSION="0.3.4"
 RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
     curl -fsSL \
-      "https://github.com/yakitrak/obsidian-cli/releases/download/v${OBSIDIAN_CLI_VERSION}/obsidian-cli_${OBSIDIAN_CLI_VERSION}_linux_${ARCH}.tar.gz" \
-      -o /tmp/obsidian-cli.tar.gz && \
-    tar -xzf /tmp/obsidian-cli.tar.gz -C /usr/local/bin obsidian-cli && \
-    chmod +x /usr/local/bin/obsidian-cli && \
-    rm /tmp/obsidian-cli.tar.gz
+      "https://github.com/Yakitrak/notesmd-cli/releases/download/v${NOTESMD_CLI_VERSION}/notesmd-cli_${NOTESMD_CLI_VERSION}_linux_${ARCH}.tar.gz" \
+      -o /tmp/notesmd-cli.tar.gz && \
+    tar -xzf /tmp/notesmd-cli.tar.gz -C /usr/local/bin notesmd-cli && \
+    chmod +x /usr/local/bin/notesmd-cli && \
+    ln -sf /usr/local/bin/notesmd-cli /usr/local/bin/obsidian-cli && \
+    rm /tmp/notesmd-cli.tar.gz
 
 # uv — fast Python package manager (https://github.com/astral-sh/uv)
 RUN set -eux; \
