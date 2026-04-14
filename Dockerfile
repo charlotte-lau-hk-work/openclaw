@@ -220,12 +220,13 @@ RUN npm install -g @googleworkspace/cli
 
 # obsidian-cli — Obsidian vault CLI (required by the obsidian skill)
 # https://github.com/yakitrak/obsidian-cli
+# Version pinned to avoid unauthenticated GitHub API rate-limit failures in CI.
+# To upgrade: update OBSIDIAN_CLI_VERSION to the new tag.
+ARG OBSIDIAN_CLI_VERSION="0.3.4"
 RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
-    OBSIDIAN_VERSION="$(curl -fsSL https://api.github.com/repos/yakitrak/obsidian-cli/releases/latest \
-      | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')"; \
     curl -fsSL \
-      "https://github.com/yakitrak/obsidian-cli/releases/download/v${OBSIDIAN_VERSION}/obsidian-cli_${OBSIDIAN_VERSION}_linux_${ARCH}.tar.gz" \
+      "https://github.com/yakitrak/obsidian-cli/releases/download/v${OBSIDIAN_CLI_VERSION}/obsidian-cli_${OBSIDIAN_CLI_VERSION}_linux_${ARCH}.tar.gz" \
       -o /tmp/obsidian-cli.tar.gz && \
     tar -xzf /tmp/obsidian-cli.tar.gz -C /usr/local/bin obsidian-cli && \
     chmod +x /usr/local/bin/obsidian-cli && \
@@ -249,17 +250,18 @@ RUN set -eux; \
     rm -rf /tmp/uv.tar.gz "/tmp/uv-${UV_TARGET}"
 
 # gh — GitHub CLI (https://github.com/cli/cli)
+# Version pinned to avoid unauthenticated GitHub API rate-limit failures in CI.
+# To upgrade: update GH_CLI_VERSION to the new tag.
+ARG GH_CLI_VERSION="2.89.0"
 RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
-    GH_VERSION="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest \
-      | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')"; \
     curl -fsSL \
-      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
+      "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${ARCH}.tar.gz" \
       -o /tmp/gh.tar.gz && \
     tar -xzf /tmp/gh.tar.gz -C /tmp && \
-    mv "/tmp/gh_${GH_VERSION}_linux_${ARCH}/bin/gh" /usr/local/bin/gh && \
+    mv "/tmp/gh_${GH_CLI_VERSION}_linux_${ARCH}/bin/gh" /usr/local/bin/gh && \
     chmod +x /usr/local/bin/gh && \
-    rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${ARCH}"
+    rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_CLI_VERSION}_linux_${ARCH}"
 
 # python-docx — Python library for reading/writing .docx files
 # Not available as an apt package; installed via pip after python3-pip apt install.
