@@ -48,6 +48,26 @@ export type {
   OpenClawPluginService,
   OpenClawPluginServiceContext,
   PluginCommandContext,
+  PluginCommandResult,
+  PluginAgentEventSubscriptionRegistration,
+  PluginAgentTurnPrepareEvent,
+  PluginAgentTurnPrepareResult,
+  PluginControlUiDescriptor,
+  PluginHeartbeatPromptContributionEvent,
+  PluginHeartbeatPromptContributionResult,
+  PluginJsonValue,
+  PluginNextTurnInjection,
+  PluginNextTurnInjectionEnqueueResult,
+  PluginNextTurnInjectionRecord,
+  PluginRunContextGetParams,
+  PluginRunContextPatch,
+  PluginRuntimeLifecycleRegistration,
+  PluginSessionSchedulerJobHandle,
+  PluginSessionSchedulerJobRegistration,
+  PluginSessionExtensionRegistration,
+  PluginSessionExtensionProjection,
+  PluginToolMetadataRegistration,
+  PluginTrustedToolPolicyRegistration,
   PluginLogger,
   ProviderAuthContext,
   ProviderAuthDoctorHintContext,
@@ -109,7 +129,7 @@ export type {
 export type { OpenClawConfig } from "../config/config.js";
 export type { OutboundIdentity } from "../infra/outbound/identity.js";
 export type { HistoryEntry } from "../auto-reply/reply/history.js";
-export type { ReplyPayload } from "../auto-reply/reply-payload.js";
+export type { ReplyPayload } from "./reply-payload.js";
 export type { AllowlistMatch } from "../channels/allowlist-match.js";
 export type {
   BaseProbeResult,
@@ -243,7 +263,7 @@ export type ChannelOutboundSessionRouteParams = Parameters<
   NonNullable<ChannelMessagingAdapter["resolveOutboundSessionRoute"]>
 >[0];
 
-var cachedSdkChatChannelMeta:
+let cachedSdkChatChannelMeta:
   | {
       cacheKey: string;
       metaById: ReturnType<typeof buildChatChannelMetaById>;
@@ -503,8 +523,12 @@ export function defineChannelPluginEntry<TPlugin>({
         registerCliMetadata?.(api);
         return;
       }
-      setRuntime?.(api.runtime);
       api.registerChannel({ plugin: plugin as ChannelPlugin });
+      setRuntime?.(api.runtime);
+      if (api.registrationMode === "discovery") {
+        registerCliMetadata?.(api);
+        return;
+      }
       if (api.registrationMode !== "full") {
         return;
       }
