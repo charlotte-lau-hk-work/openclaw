@@ -27,5 +27,7 @@ export type DaemonInstallOptions = {
 export type DaemonLifecycleOptions = {
   json?: boolean;
   force?: boolean;
+  safe?: boolean;
   wait?: string;
+  disable?: boolean;
 };

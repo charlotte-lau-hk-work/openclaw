@@ -1,5 +1,6 @@
+import { formatReasoningMessage } from "openclaw/plugin-sdk/agent-runtime";
 import { logTypingFailure } from "openclaw/plugin-sdk/channel-feedback";
-import { createChannelReplyPipeline } from "openclaw/plugin-sdk/channel-reply-pipeline";
+import { createChannelMessageReplyPipeline } from "openclaw/plugin-sdk/channel-message";
 import {
   formatChannelProgressDraftLineForEntry,
   isChannelProgressDraftWorkToolName,
@@ -154,7 +155,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
   const prefixContext = createReplyPrefixContext({ cfg, agentId });
 
   let typingState: TypingIndicatorState | null = null;
-  const { typingCallbacks } = createChannelReplyPipeline({
+  const { typingCallbacks } = createChannelMessageReplyPipeline({
     cfg,
     agentId,
     channel: "feishu",
@@ -522,7 +523,9 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
         await typingCallbacks?.onReplyStart?.();
       },
       deliver: async (payload: ReplyPayload, info) => {
-        const reply = resolveSendableOutboundReplyParts(payload);
+        const payloadText =
+          payload.isReasoning && payload.text ? formatReasoningMessage(payload.text) : payload.text;
+        const reply = resolveSendableOutboundReplyParts({ ...payload, text: payloadText });
         const text = reply.text;
         const hasText = reply.hasText;
         const hasMedia = reply.hasMedia;
@@ -694,7 +697,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
               return;
             }
             startStreaming();
-            queueReasoningUpdate(payload.text);
+            queueReasoningUpdate(formatReasoningMessage(payload.text));
           }
         : undefined,
       onReasoningEnd: reasoningPreviewEnabled ? () => {} : undefined,

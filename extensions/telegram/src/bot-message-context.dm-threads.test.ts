@@ -81,7 +81,6 @@ describe("buildTelegramMessageContext dm thread sessions", () => {
       from: { id: 42, first_name: "Alice" },
     });
 
-    expect(ctx).not.toBeNull();
     expect(ctx?.ctxPayload?.MessageThreadId).toBe(42);
     expect(ctx?.ctxPayload?.SessionKey).toBe("agent:main:main");
   });
@@ -104,7 +103,6 @@ describe("buildTelegramMessageContext dm thread sessions", () => {
       },
     );
 
-    expect(ctx).not.toBeNull();
     expect(ctx?.ctxPayload?.MessageThreadId).toBe(42);
     expect(ctx?.ctxPayload?.SessionKey).toBe("agent:main:main:thread:1234:42");
   });
@@ -136,7 +134,6 @@ describe("buildTelegramMessageContext dm thread sessions", () => {
       },
     );
 
-    expect(ctx).not.toBeNull();
     expect(ctx?.ctxPayload?.MessageThreadId).toBe(42);
     expect(ctx?.ctxPayload?.SessionKey).toBe("agent:main:main:thread:1234:42");
   });
@@ -173,7 +170,6 @@ describe("buildTelegramMessageContext dm thread sessions", () => {
       }),
     });
 
-    expect(ctx).not.toBeNull();
     expect(ctx?.ctxPayload?.MessageThreadId).toBe(42);
     expect(ctx?.ctxPayload?.SessionKey).toBe("agent:main:main:thread:1234:42");
   });
@@ -187,7 +183,6 @@ describe("buildTelegramMessageContext dm thread sessions", () => {
       from: { id: 42, first_name: "Alice" },
     });
 
-    expect(ctx).not.toBeNull();
     expect(ctx?.ctxPayload?.MessageThreadId).toBeUndefined();
     expect(ctx?.ctxPayload?.SessionKey).toBe("agent:main:main");
   });
@@ -238,10 +233,30 @@ describe("buildTelegramMessageContext group sessions without forum", () => {
       from: { id: 42, first_name: "Alice" },
     });
 
-    expect(ctxWithThread).not.toBeNull();
-    expect(ctxWithoutThread).not.toBeNull();
     // Both messages should use the same session key
     expect(ctxWithThread?.ctxPayload?.SessionKey).toBe(ctxWithoutThread?.ctxPayload?.SessionKey);
+  });
+
+  it("does not add a topic-cache store lookup for non-forum group reply threads", async () => {
+    const resolveStorePath = vi.fn(() => "/tmp/openclaw/session-store.json");
+
+    const ctx = await buildTelegramMessageContextForTest({
+      message: {
+        message_id: 9,
+        chat: { id: -1001234567890, type: "supergroup", title: "Test Group" },
+        date: 1700000008,
+        text: "@bot hello",
+        message_thread_id: 42,
+        from: { id: 42, first_name: "Alice" },
+      },
+      options: { forceWasMentioned: true },
+      resolveGroupActivation: () => true,
+      sessionRuntime: { resolveStorePath },
+    });
+
+    expect(ctx?.isForum).toBe(false);
+    expect(ctx?.ctxPayload?.MessageThreadId).toBeUndefined();
+    expect(resolveStorePath).toHaveBeenCalledTimes(1);
   });
 
   it("uses topic session for forum groups with message_thread_id", async () => {
@@ -254,7 +269,6 @@ describe("buildTelegramMessageContext group sessions without forum", () => {
       from: { id: 42, first_name: "Alice" },
     });
 
-    expect(ctx).not.toBeNull();
     // Session key SHOULD include :topic:99 for forums
     expect(ctx?.ctxPayload?.SessionKey).toBe("agent:main:telegram:group:-1001234567890:topic:99");
     expect(ctx?.ctxPayload?.MessageThreadId).toBe(99);
@@ -274,7 +288,6 @@ describe("buildTelegramMessageContext group sessions without forum", () => {
       },
     });
 
-    expect(ctx).not.toBeNull();
     expect(ctx?.ctxPayload?.TopicName).toBe("Deployments");
   });
 
@@ -297,7 +310,6 @@ describe("buildTelegramMessageContext group sessions without forum", () => {
       sessionRuntime: null,
     });
 
-    expect(ctx).not.toBeNull();
     expect(ctx?.ctxPayload?.TopicName).toBe("Deployments");
   });
 
@@ -339,7 +351,6 @@ describe("buildTelegramMessageContext group sessions without forum", () => {
         from: { id: 42, first_name: "Alice" },
       });
 
-      expect(ctx).not.toBeNull();
       expect(ctx?.ctxPayload?.TopicName).toBe("Deployments");
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
@@ -387,7 +398,6 @@ describe("buildTelegramMessageContext group sessions without forum", () => {
         sessionRuntime: null,
       });
 
-      expect(ctx).not.toBeNull();
       expect(ctx?.ctxPayload?.TopicName).toBe("Deployments");
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });

@@ -102,7 +102,9 @@ describe("watch-node script", () => {
 
       expect(createWatcher).toHaveBeenCalledTimes(1);
       const firstWatcherCall = createWatcher.mock.calls[0];
-      expect(firstWatcherCall).toBeDefined();
+      if (firstWatcherCall === undefined) {
+        throw new Error("expected watcher setup call");
+      }
       const [watchPaths, watchOptions] = firstWatcherCall as unknown as [
         string[],
         { ignoreInitial: boolean; ignored: (watchPath: string) => boolean },
@@ -147,11 +149,49 @@ describe("watch-node script", () => {
           }),
         }),
       );
+      expect(spawn).toHaveBeenCalledWith(
+        "/usr/local/bin/node",
+        ["scripts/run-node.mjs", "gateway", "--force"],
+        expect.objectContaining({
+          env: expect.not.objectContaining({
+            OPENCLAW_TRACE_SYNC_IO: expect.any(String),
+          }),
+        }),
+      );
       fakeProcess.emit("SIGINT");
       const exitCode = await runPromise;
       expect(exitCode).toBe(130);
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
       expect(watcher.close).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("preserves explicit sync I/O trace overrides for gateway watch", async () => {
+    const { child, spawn, createWatcher, fakeProcess } = createWatchHarness();
+    await withTempDir({ prefix: "openclaw-watch-node-" }, async (cwd) => {
+      const runPromise = runWatch({
+        args: ["gateway", "--force"],
+        cwd,
+        createWatcher,
+        env: { OPENCLAW_TRACE_SYNC_IO: "0" },
+        lockDisabled: true,
+        process: fakeProcess,
+        spawn,
+      });
+
+      expect(spawn).toHaveBeenCalledWith(
+        "/usr/local/bin/node",
+        ["scripts/run-node.mjs", "gateway", "--force"],
+        expect.objectContaining({
+          env: expect.objectContaining({
+            OPENCLAW_TRACE_SYNC_IO: "0",
+          }),
+        }),
+      );
+
+      fakeProcess.emit("SIGINT");
+      await runPromise;
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     });
   });
 

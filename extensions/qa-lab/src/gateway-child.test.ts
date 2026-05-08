@@ -407,6 +407,44 @@ describe("buildQaRuntimeEnv", () => {
     });
   });
 
+  it("stages live env API-key profiles for isolated QA workers", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "qa-live-api-key-state-"));
+    cleanups.push(async () => {
+      await rm(stateDir, { recursive: true, force: true });
+    });
+
+    const cfg = await __testing.stageQaLiveApiKeyProfiles({
+      cfg: {},
+      stateDir,
+      providerIds: ["openai"],
+      env: {
+        OPENAI_API_KEY: "qa-live-not-a-real-key",
+      },
+    });
+
+    expect(cfg.auth?.profiles?.["qa-live-openai-env"]).toMatchObject({
+      provider: "openai",
+      mode: "api_key",
+      displayName: "QA live openai env credential",
+    });
+
+    for (const agentId of ["main", "qa"]) {
+      const storeRaw = await readFile(
+        path.join(stateDir, "agents", agentId, "agent", "auth-profiles.json"),
+        "utf8",
+      );
+      expect(JSON.parse(storeRaw)).toMatchObject({
+        profiles: {
+          "qa-live-openai-env": {
+            type: "api_key",
+            provider: "openai",
+            key: "qa-live-not-a-real-key",
+          },
+        },
+      });
+    }
+  });
+
   it("stages placeholder mock auth profiles per agent dir so mock-openai runs can resolve credentials", async () => {
     const stateDir = await mkdtemp(path.join(os.tmpdir(), "qa-mock-auth-"));
     cleanups.push(async () => {
@@ -480,7 +518,10 @@ describe("buildQaRuntimeEnv", () => {
     const qaStore = JSON.parse(
       await readFile(path.join(stateDir, "agents", "qa", "agent", "auth-profiles.json"), "utf8"),
     ) as { profiles: Record<string, unknown> };
-    expect(qaStore.profiles["qa-mock-openai"]).toBeDefined();
+    expect(qaStore.profiles["qa-mock-openai"]).toMatchObject({
+      provider: "openai",
+      type: "api_key",
+    });
     expect(qaStore.profiles["qa-mock-anthropic"]).toBeUndefined();
 
     // main/agent should not exist because it wasn't in the agentIds list.
@@ -549,7 +590,7 @@ describe("buildQaRuntimeEnv", () => {
       expect(processKill).toHaveBeenCalledWith(-12345, "SIGTERM");
       expect(processKill).toHaveBeenCalledWith(-12345, "SIGKILL");
     }
-    expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    expect([child.exitCode, child.signalCode]).not.toEqual([null, null]);
   });
 
   it("treats bind collisions as retryable gateway startup errors", () => {
@@ -931,10 +972,6 @@ describe("qa bundled plugin dir", () => {
     expect(stagedRoot).toBe(
       path.join(repoRoot, ".artifacts", "qa-runtime", path.basename(tempRoot)),
     );
-    expect(stagedRoot).not.toBeNull();
-    if (!stagedRoot) {
-      throw new Error("expected staged runtime root");
-    }
     await expect(readFile(path.join(stagedRoot, "package.json"), "utf8")).resolves.toContain(
       '"name": "openclaw"',
     );
@@ -948,18 +985,21 @@ describe("qa bundled plugin dir", () => {
     expect((await lstat(path.join(bundledPluginsDir, "qa-channel"))).isDirectory()).toBe(true);
     expect((await lstat(path.join(bundledPluginsDir, "memory-core"))).isDirectory()).toBe(true);
     expect((await lstat(path.join(bundledPluginsDir, "speech-core"))).isDirectory()).toBe(true);
-    await expect(
-      lstat(
-        path.join(
-          repoRoot,
-          ".artifacts",
-          "qa-runtime",
-          path.basename(tempRoot),
-          "dist",
-          "shared-chunk-abc123.js",
-        ),
+    const sharedChunkStat = await lstat(
+      path.join(
+        repoRoot,
+        ".artifacts",
+        "qa-runtime",
+        path.basename(tempRoot),
+        "dist",
+        "shared-chunk-abc123.js",
       ),
-    ).resolves.toBeTruthy();
+    );
+    if (sharedChunkStat.isFile()) {
+      expect(sharedChunkStat.isFile()).toBe(true);
+    } else {
+      expect(sharedChunkStat.isSymbolicLink()).toBe(true);
+    }
   });
 
   it("preserves dist-runtime-only root chunks when dist also exists", async () => {
@@ -1024,18 +1064,21 @@ describe("qa bundled plugin dir", () => {
     ).resolves.toMatchObject({
       marker: "runtime",
     });
-    await expect(
-      lstat(
-        path.join(
-          repoRoot,
-          ".artifacts",
-          "qa-runtime",
-          path.basename(tempRoot),
-          "dist",
-          "runtime-chunk.js",
-        ),
+    const runtimeChunkStat = await lstat(
+      path.join(
+        repoRoot,
+        ".artifacts",
+        "qa-runtime",
+        path.basename(tempRoot),
+        "dist",
+        "runtime-chunk.js",
       ),
-    ).resolves.toBeTruthy();
+    );
+    if (runtimeChunkStat.isFile()) {
+      expect(runtimeChunkStat.isFile()).toBe(true);
+    } else {
+      expect(runtimeChunkStat.isSymbolicLink()).toBe(true);
+    }
   });
 
   it("rejects invalid bundled plugin ids before staging paths are built", async () => {

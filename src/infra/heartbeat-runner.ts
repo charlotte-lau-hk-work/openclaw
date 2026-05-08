@@ -16,6 +16,7 @@ import { appendCronStyleCurrentTimeLine } from "../agents/current-time.js";
 import { isNestedAgentLane } from "../agents/lanes.js";
 import { resolveModelRefFromString, type ModelRef } from "../agents/model-selection.js";
 import { resolveEmbeddedSessionLane } from "../agents/pi-embedded-runner/lanes.js";
+import { formatReasoningMessage } from "../agents/pi-embedded-utils.js";
 import { DEFAULT_HEARTBEAT_FILENAME } from "../agents/workspace.js";
 import { resolveHeartbeatReplyPayload } from "../auto-reply/heartbeat-reply-payload.js";
 import {
@@ -639,10 +640,26 @@ function resolveHeartbeatReasoningPayloads(
   replyResult: ReplyPayload | ReplyPayload[] | undefined,
 ): ReplyPayload[] {
   const payloads = Array.isArray(replyResult) ? replyResult : replyResult ? [replyResult] : [];
-  return payloads.filter((payload) => {
+  const reasoningPayloads: ReplyPayload[] = [];
+  for (const payload of payloads) {
     const text = typeof payload.text === "string" ? payload.text : "";
-    return text.trimStart().startsWith("Reasoning:");
-  });
+    const hasLegacyReasoningPrefix = text.trimStart().startsWith("Reasoning:");
+    if (payload.isReasoning !== true && !hasLegacyReasoningPrefix) {
+      continue;
+    }
+
+    const formattedText = hasLegacyReasoningPrefix ? text : formatReasoningMessage(text);
+    if (!formattedText.trim()) {
+      continue;
+    }
+
+    const deliverablePayload: ReplyPayload = { ...payload, text: formattedText };
+    delete deliverablePayload.isReasoning;
+    delete deliverablePayload.mediaUrl;
+    delete deliverablePayload.mediaUrls;
+    reasoningPayloads.push(deliverablePayload);
+  }
+  return reasoningPayloads;
 }
 
 async function restoreHeartbeatUpdatedAt(params: {
@@ -1206,6 +1223,24 @@ export async function runHeartbeatOnce(opts: {
       durationMs: Date.now() - startedAt,
     });
     return { status: "skipped", reason: HEARTBEAT_SKIP_LANES_BUSY };
+  }
+
+  // Phase 2: Stronger heartbeat deferral while a final delivery replay is pending.
+  // Plain `updatedAt` changes are normal for heartbeat sessions and should not
+  // suppress heartbeat runs; only defer when final delivery recovery is active.
+  const { entry: recentSessionEntry } = resolveHeartbeatSession(
+    cfg,
+    agentId,
+    heartbeat,
+    opts.sessionKey,
+  );
+  const HEARTBEAT_DEFER_WINDOW_MS = 30_000;
+  if (
+    recentSessionEntry?.pendingFinalDelivery === true &&
+    recentSessionEntry?.updatedAt &&
+    startedAt - recentSessionEntry.updatedAt < HEARTBEAT_DEFER_WINDOW_MS
+  ) {
+    return { status: "skipped", reason: HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT };
   }
 
   // Preflight centralizes trigger classification, event inspection, and HEARTBEAT.md gating.

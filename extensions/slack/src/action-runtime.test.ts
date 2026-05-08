@@ -16,7 +16,6 @@ const reactSlackMessage = vi.fn(async (..._args: unknown[]) => ({}));
 const readSlackMessages = vi.fn(async (..._args: unknown[]) => ({}));
 const removeOwnSlackReactions = vi.fn(async (..._args: unknown[]) => ["thumbsup"]);
 const removeSlackReaction = vi.fn(async (..._args: unknown[]) => ({}));
-const recordSlackThreadParticipation = vi.fn();
 const sendSlackMessage = vi.fn(async (..._args: unknown[]) => ({ channelId: "C123" }));
 const unpinSlackMessage = vi.fn(async (..._args: unknown[]) => ({}));
 
@@ -103,7 +102,6 @@ describe("handleSlackAction", () => {
       pinSlackMessage,
       reactSlackMessage,
       readSlackMessages,
-      recordSlackThreadParticipation,
       removeOwnSlackReactions,
       removeSlackReaction,
       sendSlackMessage,
@@ -292,7 +290,7 @@ describe("handleSlackAction", () => {
         text: expect.stringContaining("/tmp/openclaw-media/report.pdf"),
       }),
     );
-    expect(result.content.some((entry) => entry.type === "image")).toBe(false);
+    expect(result.content.filter((entry) => entry.type === "image")).toEqual([]);
     expect(result.details).toEqual(
       expect.objectContaining({
         ok: true,

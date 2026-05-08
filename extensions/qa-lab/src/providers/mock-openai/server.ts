@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
+import { escapeRegExp } from "openclaw/plugin-sdk/text-runtime";
+import { readRequestBodyWithLimit } from "openclaw/plugin-sdk/webhook-ingress";
 import { closeQaHttpServer } from "../../bus-server.js";
 
 type ResponsesInputItem = Record<string, unknown>;
@@ -153,10 +155,13 @@ const QA_GROUP_VISIBLE_REPLY_TOOL_PROMPT_RE = /qa group visible reply tool check
 const QA_GROUP_MESSAGE_UNAVAILABLE_FALLBACK_PROMPT_RE =
   /qa group message unavailable fallback check/i;
 const QA_TELEGRAM_CURRENT_SESSION_STATUS_PROMPT_RE = /telegram current session_status qa check/i;
+const QA_TELEGRAM_LONG_FINAL_THREE_CHUNK_PROMPT_RE = /telegram long final three chunk qa check/i;
+const QA_TELEGRAM_LONG_FINAL_PROMPT_RE = /telegram long final qa check/i;
 const QA_SUBAGENT_DIRECT_FALLBACK_PROMPT_RE = /subagent direct fallback qa check/i;
 const QA_SUBAGENT_DIRECT_FALLBACK_WORKER_RE = /subagent direct fallback worker/i;
 const QA_SUBAGENT_DIRECT_FALLBACK_MARKER = "QA-SUBAGENT-DIRECT-FALLBACK-OK";
-const QA_IMAGE_GENERATION_PROMPT_RE = /image generation check|capability flip image check/i;
+const QA_IMAGE_GENERATION_PROMPT_RE =
+  /image generation check|capability flip image check|\/tool\s+image_generate/i;
 const QA_REASONING_ONLY_RETRY_NEEDLE =
   "recorded reasoning but did not produce a user-visible answer";
 const QA_EMPTY_RESPONSE_RETRY_NEEDLE =
@@ -170,12 +175,13 @@ type MockScenarioState = {
   subagentFanoutPhase: number;
 };
 
+const MOCK_OPENAI_MAX_BODY_BYTES = 16 * 1024 * 1024;
+const MOCK_OPENAI_BODY_TIMEOUT_MS = 30_000;
+
 function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
+  return readRequestBodyWithLimit(req, {
+    maxBytes: MOCK_OPENAI_MAX_BODY_BYTES,
+    timeoutMs: MOCK_OPENAI_BODY_TIMEOUT_MS,
   });
 }
 
@@ -574,7 +580,7 @@ function extractExactMarkerDirective(text: string) {
 }
 
 function extractLabeledMarkerDirective(text: string, label: string) {
-  const escapedLabel = label.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedLabel = escapeRegExp(label);
   const backtickedMatch = extractLastCapture(
     text,
     new RegExp(`${escapedLabel}:\\s*\`([^\\\`]+)\``, "i"),
@@ -589,12 +595,12 @@ function extractLabeledMarkerDirective(text: string, label: string) {
 }
 
 function extractQuotedToolArg(text: string, name: string) {
-  const escapedName = name.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedName = escapeRegExp(name);
   return extractLastCapture(text, new RegExp(`\\b${escapedName}\\s*=\\s*"([^"]+)"`, "i"));
 }
 
 function extractBareToolArg(text: string, name: string) {
-  const escapedName = name.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedName = escapeRegExp(name);
   return extractLastCapture(text, new RegExp(`\\b${escapedName}\\s*=\\s*([^\\s\\\`.,;:!?]+)`, "i"));
 }
 
@@ -1034,6 +1040,23 @@ function splitMockStreamingText(text: string, parts = 3) {
   return chunks.length > 1 ? chunks : [text.slice(0, 1), text.slice(1)];
 }
 
+function buildTelegramLongFinalText({
+  endMarker = "TELEGRAM-LONG-FINAL-END",
+  segmentCount = 54,
+  startMarker = "TELEGRAM-LONG-FINAL-BEGIN",
+}: {
+  endMarker?: string;
+  segmentCount?: number;
+  startMarker?: string;
+} = {}) {
+  const body = Array.from(
+    { length: segmentCount },
+    (_, index) =>
+      `telegram-long-final-segment-${String(index + 1).padStart(3, "0")} ${"x".repeat(54)}`,
+  ).join("\n");
+  return `${startMarker}\n${body}\n${endMarker}`;
+}
+
 function buildAssistantOutputItem(spec: MockAssistantMessageSpec) {
   return {
     type: "message",
@@ -1310,6 +1333,32 @@ async function buildResponsesPayload(
     }
     return buildAssistantEvents("");
   }
+  if (QA_TELEGRAM_LONG_FINAL_THREE_CHUNK_PROMPT_RE.test(allInputText)) {
+    const text = buildTelegramLongFinalText({
+      endMarker: "TELEGRAM-LONG-FINAL-3CHUNK-END",
+      segmentCount: 96,
+      startMarker: "TELEGRAM-LONG-FINAL-3CHUNK-BEGIN",
+    });
+    return buildAssistantEvents([
+      {
+        id: "msg_mock_telegram_long_final_three_chunk",
+        phase: "final_answer",
+        streamDeltas: splitMockStreamingText(text),
+        text,
+      },
+    ]);
+  }
+  if (QA_TELEGRAM_LONG_FINAL_PROMPT_RE.test(allInputText)) {
+    const text = buildTelegramLongFinalText();
+    return buildAssistantEvents([
+      {
+        id: "msg_mock_telegram_long_final",
+        phase: "final_answer",
+        streamDeltas: splitMockStreamingText(text),
+        text,
+      },
+    ]);
+  }
   if (QA_STREAMING_PROMPT_RE.test(allInputText) && exactReplyDirective) {
     return buildAssistantEvents([
       {
@@ -1372,7 +1421,16 @@ async function buildResponsesPayload(
       exactMarkerDirective ?? exactReplyDirective ?? "QA-GROUP-FALLBACK-OK",
     );
   }
-  if (QA_TELEGRAM_CURRENT_SESSION_STATUS_PROMPT_RE.test(allInputText)) {
+  if (/\bmarker\b/i.test(prompt) && exactReplyDirective) {
+    return buildAssistantEvents(exactReplyDirective);
+  }
+  if (/\bmarker\b/i.test(prompt) && exactMarkerDirective) {
+    return buildAssistantEvents(exactMarkerDirective);
+  }
+  const isTelegramCurrentSessionStatusTurn =
+    QA_TELEGRAM_CURRENT_SESSION_STATUS_PROMPT_RE.test(prompt) ||
+    (Boolean(toolOutput) && QA_TELEGRAM_CURRENT_SESSION_STATUS_PROMPT_RE.test(allInputText));
+  if (isTelegramCurrentSessionStatusTurn) {
     if (!toolOutput && hasDeclaredTool(body, "session_status")) {
       return buildToolCallEventsWithArgs("session_status", { sessionKey: "current" });
     }

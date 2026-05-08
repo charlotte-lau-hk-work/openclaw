@@ -50,6 +50,16 @@ async function waitForPluginEventHandlers(): Promise<void> {
   });
 }
 
+function requireFirstCommandRegistration(
+  registry: ReturnType<typeof createPluginRegistryFixture>["registry"]["registry"],
+) {
+  const registration = registry.commands[0];
+  if (!registration) {
+    throw new Error("expected first plugin command registration");
+  }
+  return registration;
+}
+
 describe("host-hook fixture plugin contract", () => {
   afterEach(() => {
     setActivePluginRegistry(createEmptyPluginRegistry());
@@ -1305,7 +1315,7 @@ describe("host-hook fixture plugin contract", () => {
     expect(validatePluginsUiDescriptorsParams({ pluginId: "host-hook-fixture" })).toBe(false);
   });
 
-  it("enforces command requiredScopes for gateway clients while preserving text command continuations", async () => {
+  it("enforces command requiredScopes for gateway clients and command owners", async () => {
     const handlerCalls: string[] = [];
     const { config, registry } = createPluginRegistryFixture();
     registerTestPlugin({
@@ -1328,8 +1338,7 @@ describe("host-hook fixture plugin contract", () => {
         });
       },
     });
-    const registration = registry.registry.commands[0];
-    expect(registration).toBeTruthy();
+    const registration = requireFirstCommandRegistration(registry.registry);
     const command = {
       ...registration.command,
       pluginId: registration.pluginId,
@@ -1360,6 +1369,7 @@ describe("host-hook fixture plugin contract", () => {
         senderId: "owner",
         channel: "whatsapp",
         isAuthorizedSender: true,
+        senderIsOwner: true,
         sessionKey: "agent:main:main",
         commandBody: "/approval-fixture resume-text",
         config,
@@ -1705,8 +1715,8 @@ describe("host-hook fixture plugin contract", () => {
 
     expect(parityMap).toHaveLength(8);
     for (const [entryPoint, seam] of parityMap) {
-      expect(entryPoint).toBeTruthy();
-      expect(seam).toBeTruthy();
+      expect(entryPoint).not.toBe("");
+      expect(seam).not.toBe("");
       expect(seam).not.toContain("Plan Mode");
     }
   });
