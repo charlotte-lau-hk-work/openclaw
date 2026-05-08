@@ -280,6 +280,9 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends vncsnapshot
 RUN pip3 install --no-cache-dir --break-system-packages vncdotool
 
+# Scrapling — adaptive web scraping with anti-bot bypass (curl_cffi, patchright, MCP server)
+RUN pip3 install --no-cache-dir --break-system-packages 'scrapling[all]'
+
 # Optionally install Chromium and Xvfb for browser automation.
 # Build with: docker build --build-arg OPENCLAW_INSTALL_BROWSER=1 ...
 # Adds ~300MB but eliminates the 60-90s Playwright install on every container start.
