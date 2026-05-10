@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { escapeRegExp, formatEnvelopeTimestamp } from "openclaw/plugin-sdk/channel-test-helpers";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { setLoggerOverride } from "openclaw/plugin-sdk/runtime-env";
 import { withEnvAsync } from "openclaw/plugin-sdk/test-env";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -246,7 +246,10 @@ describe("web auto-reply connection", () => {
       await vi.waitFor(
         () => {
           expect(scripted.getListenerCount()).toBe(1);
-          expect(getActiveWebListener(accountId)).not.toBeNull();
+          const activeListener = getActiveWebListener(accountId);
+          if (!activeListener) {
+            throw new Error("expected active WhatsApp web listener");
+          }
         },
         { timeout: 250, interval: 2 },
       );
@@ -751,6 +754,9 @@ describe("web auto-reply connection", () => {
           timestamp: 1735689600000,
           spies,
         });
+        if (!capturedOnMessage) {
+          throw new Error("Expected WhatsApp web runtime to register onMessage.");
+        }
         await sendWebDirectInboundMessage({
           onMessage: capturedOnMessage,
           body: "second",

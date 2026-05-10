@@ -40,7 +40,7 @@ import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-pay
 import type { ReplyDispatchKind, ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import { danger, logVerbose, shouldLogVerbose, sleep } from "openclaw/plugin-sdk/runtime-env";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
-import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/text-runtime";
+import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { reactSlackMessage, removeSlackReaction } from "../../actions.js";
 import { createSlackDraftStream } from "../../draft-stream.js";
 import { normalizeSlackOutboundText } from "../../format.js";
@@ -921,6 +921,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
         cfg,
         token: ctx.botToken,
         accountId: account.accountId,
+        identity: slackIdentity,
         maxChars: Math.min(ctx.textLimit, SLACK_TEXT_LIMIT),
         resolveThreadTs: () => {
           const ts = replyPlan.peekThreadTs();
@@ -1345,7 +1346,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
 
   if (!anyReplyDelivered) {
     await draftStream?.clear();
-    if (prepared.isRoomish) {
+    if (prepared.isRoomish && prepared.requireMention) {
       clearHistoryEntriesIfEnabled({
         historyMap: ctx.channelHistories,
         historyKey: prepared.historyKey,
@@ -1388,7 +1389,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     });
   }
 
-  if (prepared.isRoomish) {
+  if (prepared.isRoomish && prepared.requireMention) {
     clearHistoryEntriesIfEnabled({
       historyMap: ctx.channelHistories,
       historyKey: prepared.historyKey,

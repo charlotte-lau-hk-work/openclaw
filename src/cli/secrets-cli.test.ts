@@ -175,6 +175,25 @@ describe("secrets CLI", () => {
     expect(runtimeLogs.at(-1)).toContain('"ok": true');
   });
 
+  it("explains Gateway reload failures without duplicate doctor noise", async () => {
+    callGatewayFromCli.mockRejectedValue(
+      new Error(
+        "gateway closed (1006 abnormal closure). Gateway target: ws://127.0.0.1:18789 Source: local loopback Config: /tmp/openclaw.json Bind: loopback Possible causes: - Gateway not yet ready. Run `openclaw doctor` for diagnostics.",
+      ),
+    );
+
+    await expect(
+      createProgram().parseAsync(["secrets", "reload"], { from: "user" }),
+    ).rejects.toThrow("__exit__:1");
+
+    expect(runtimeErrors.at(-1)).toContain(
+      "Could not reload secrets because the Gateway did not respond: gateway closed (1006 abnormal closure).",
+    );
+    expect(runtimeErrors.at(-1)).toContain("openclaw gateway status --deep");
+    expect(runtimeErrors.at(-1)).not.toContain("Gateway target:");
+    expect(runtimeErrors.at(-1)).not.toContain("diagnostics..");
+  });
+
   it("runs secrets audit and exits via check code", async () => {
     runSecretsAudit.mockResolvedValue({
       version: 1,
@@ -331,7 +350,7 @@ describe("secrets CLI", () => {
       const skippedExecNotes = runtimeLogs.filter((line) =>
         line.includes("Secrets apply dry-run note: skipped"),
       );
-      expect(skippedExecNotes).toEqual([]);
+      expect(skippedExecNotes).toStrictEqual([]);
     });
   });
 
@@ -345,7 +364,7 @@ describe("secrets CLI", () => {
     const preflightSkippedExecNotes = runtimeLogs.filter((line) =>
       line.includes("Preflight note: skipped"),
     );
-    expect(preflightSkippedExecNotes).toEqual([]);
+    expect(preflightSkippedExecNotes).toStrictEqual([]);
   });
 
   it("forwards --allow-exec to configure preflight and apply", async () => {

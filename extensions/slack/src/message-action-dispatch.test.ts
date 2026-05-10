@@ -2,10 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 import { handleSlackMessageAction } from "./message-action-dispatch.js";
 
 function createInvokeSpy() {
-  return vi.fn(async (action: Record<string, unknown>) => ({
+  return vi.fn(async (action: Record<string, unknown>, _cfg?: unknown, _toolContext?: unknown) => ({
     ok: true,
     content: action,
   }));
+}
+
+function slackConfig() {
+  return { channels: { slack: { botToken: "tok" } } };
+}
+
+function expectForwardedCfg(invoke: ReturnType<typeof createInvokeSpy>, cfg: unknown) {
+  expect(invoke.mock.calls[0]?.[1]).toBe(cfg);
 }
 
 describe("handleSlackMessageAction", () => {
@@ -101,12 +109,13 @@ describe("handleSlackMessageAction", () => {
 
   it("passes media and rendered interactive blocks through for split Slack delivery", async () => {
     const invoke = createInvokeSpy();
+    const cfg = slackConfig();
 
     await handleSlackMessageAction({
       providerId: "slack",
       ctx: {
         action: "send",
-        cfg: {},
+        cfg,
         params: {
           to: "channel:C1",
           message: "Approval required",
@@ -138,19 +147,53 @@ describe("handleSlackMessageAction", () => {
           }),
         ],
       }),
-      expect.any(Object),
+      cfg,
+      undefined,
+    );
+    expectForwardedCfg(invoke, cfg);
+  });
+
+  it("passes replyBroadcast through for Slack thread sends", async () => {
+    const invoke = createInvokeSpy();
+    const cfg = slackConfig();
+
+    await handleSlackMessageAction({
+      providerId: "slack",
+      ctx: {
+        action: "send",
+        cfg,
+        params: {
+          to: "channel:C1",
+          message: "Visible from the channel",
+          threadId: "111.222",
+          replyBroadcast: true,
+        },
+      } as never,
+      invoke: invoke as never,
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "sendMessage",
+        to: "channel:C1",
+        content: "Visible from the channel",
+        threadTs: "111.222",
+        replyBroadcast: true,
+      }),
+      cfg,
       undefined,
     );
   });
 
   it("maps upload-file to the internal uploadFile action", async () => {
     const invoke = createInvokeSpy();
+    const cfg = slackConfig();
 
     await handleSlackMessageAction({
       providerId: "slack",
       ctx: {
         action: "upload-file",
-        cfg: {},
+        cfg,
         params: {
           to: "user:U1",
           filePath: "/tmp/report.png",
@@ -173,19 +216,40 @@ describe("handleSlackMessageAction", () => {
         title: "Build Screenshot",
         threadTs: "111.222",
       }),
-      expect.any(Object),
+      cfg,
       undefined,
     );
+    expectForwardedCfg(invoke, cfg);
+  });
+
+  it("rejects replyBroadcast for upload-file", async () => {
+    await expect(
+      handleSlackMessageAction({
+        providerId: "slack",
+        ctx: {
+          action: "upload-file",
+          cfg: {},
+          params: {
+            to: "channel:C1",
+            filePath: "/tmp/report.png",
+            threadId: "111.222",
+            replyBroadcast: true,
+          },
+        } as never,
+        invoke: createInvokeSpy() as never,
+      }),
+    ).rejects.toThrow(/replyBroadcast is only supported for text or block thread replies/i);
   });
 
   it("maps upload-file aliases to upload params", async () => {
     const invoke = createInvokeSpy();
+    const cfg = slackConfig();
 
     await handleSlackMessageAction({
       providerId: "slack",
       ctx: {
         action: "upload-file",
-        cfg: {},
+        cfg,
         params: {
           channelId: "C1",
           media: "/tmp/chart.png",
@@ -204,19 +268,21 @@ describe("handleSlackMessageAction", () => {
         initialComment: "chart attached",
         threadTs: "333.444",
       }),
-      expect.any(Object),
+      cfg,
       undefined,
     );
+    expectForwardedCfg(invoke, cfg);
   });
 
   it("maps upload-file path alias to filePath", async () => {
     const invoke = createInvokeSpy();
+    const cfg = slackConfig();
 
     await handleSlackMessageAction({
       providerId: "slack",
       ctx: {
         action: "upload-file",
-        cfg: {},
+        cfg,
         params: {
           to: "channel:C1",
           path: "/tmp/report.txt",
@@ -233,9 +299,10 @@ describe("handleSlackMessageAction", () => {
         filePath: "/tmp/report.txt",
         initialComment: "path alias",
       }),
-      expect.any(Object),
+      cfg,
       undefined,
     );
+    expectForwardedCfg(invoke, cfg);
   });
 
   it("forwards messageId for read actions", async () => {
@@ -282,12 +349,13 @@ describe("handleSlackMessageAction", () => {
 
   it("maps download-file to the internal downloadFile action", async () => {
     const invoke = createInvokeSpy();
+    const cfg = slackConfig();
 
     await handleSlackMessageAction({
       providerId: "slack",
       ctx: {
         action: "download-file",
-        cfg: {},
+        cfg,
         params: {
           channelId: "C1",
           fileId: "F123",
@@ -304,18 +372,20 @@ describe("handleSlackMessageAction", () => {
         channelId: "C1",
         threadId: "111.222",
       }),
-      expect.any(Object),
+      cfg,
     );
+    expectForwardedCfg(invoke, cfg);
   });
 
   it("maps download-file target aliases to scope fields", async () => {
     const invoke = createInvokeSpy();
+    const cfg = slackConfig();
 
     await handleSlackMessageAction({
       providerId: "slack",
       ctx: {
         action: "download-file",
-        cfg: {},
+        cfg,
         params: {
           to: "channel:C2",
           fileId: "F999",
@@ -332,7 +402,58 @@ describe("handleSlackMessageAction", () => {
         channelId: "channel:C2",
         threadId: "333.444",
       }),
-      expect.any(Object),
+      cfg,
     );
+    expectForwardedCfg(invoke, cfg);
+  });
+
+  it("explains that download-file requires fileId, not messageId", async () => {
+    await expect(
+      handleSlackMessageAction({
+        providerId: "slack",
+        ctx: {
+          action: "download-file",
+          cfg: {},
+          params: {
+            channelId: "C1",
+            messageId: "1777423717.666499",
+          },
+        } as never,
+        invoke: createInvokeSpy() as never,
+      }),
+    ).rejects.toThrow(/Did you mean to pass fileId/i);
+  });
+
+  it("explains that download-file requires fileId for message_id aliases", async () => {
+    await expect(
+      handleSlackMessageAction({
+        providerId: "slack",
+        ctx: {
+          action: "download-file",
+          cfg: {},
+          params: {
+            channelId: "C1",
+            message_id: "1777423717.666499",
+          },
+        } as never,
+        invoke: createInvokeSpy() as never,
+      }),
+    ).rejects.toThrow(/Did you mean to pass fileId/i);
+  });
+
+  it("keeps the generic fileId requirement when no message id was supplied", async () => {
+    await expect(
+      handleSlackMessageAction({
+        providerId: "slack",
+        ctx: {
+          action: "download-file",
+          cfg: {},
+          params: {
+            channelId: "C1",
+          },
+        } as never,
+        invoke: createInvokeSpy() as never,
+      }),
+    ).rejects.toThrow(/fileId/i);
   });
 });

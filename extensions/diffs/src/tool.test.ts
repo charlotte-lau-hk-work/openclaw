@@ -223,6 +223,35 @@ describe("diffs tool", () => {
     }
   });
 
+  it("uses default ttlSeconds when tool input omits ttlSeconds", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-02-27T16:00:00Z");
+    vi.setSystemTime(now);
+    try {
+      const screenshotter = createPngScreenshotter();
+      const tool = createToolWithScreenshotter(store, screenshotter, {
+        ...DEFAULT_DIFFS_TOOL_DEFAULTS,
+        ttlSeconds: 60,
+      });
+
+      const result = await tool.execute?.("tool-2c-default-ttl", {
+        before: "one\n",
+        after: "two\n",
+        mode: "file",
+      });
+      const filePath = (result?.details as Record<string, unknown>).filePath as string;
+      await expect(fs.stat(filePath)).resolves.toBeDefined();
+
+      vi.setSystemTime(new Date(now.getTime() + 61_000));
+      await store.cleanupExpired();
+      await expect(fs.stat(filePath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("accepts image* tool options for backward compatibility", async () => {
     const screenshotter = createPngScreenshotter({
       assertImage: (image) => {
@@ -397,7 +426,7 @@ describe("diffs tool", () => {
     });
 
     const viewerPath = String((result?.details as Record<string, unknown>).viewerPath);
-    const [id] = viewerPath.split("/").filter(Boolean).slice(-2);
+    const id = extractViewerArtifactId(viewerPath);
     const html = await store.readHtml(id);
     expect(html).toContain('body data-theme="light"');
     expect(html).toContain("--diffs-font-size: 17px;");
@@ -446,7 +475,7 @@ describe("diffs tool", () => {
     expect((result?.details as Record<string, unknown>).fileScale).toBe(2.75);
     expect((result?.details as Record<string, unknown>).fileMaxWidth).toBe(1320);
     const viewerPath = String((result?.details as Record<string, unknown>).viewerPath);
-    const [id] = viewerPath.split("/").filter(Boolean).slice(-2);
+    const id = extractViewerArtifactId(viewerPath);
     const html = await store.readHtml(id);
     expect(html).toContain('body data-theme="dark"');
   });
@@ -578,6 +607,22 @@ function readDetails(result: unknown): Record<string, unknown> {
     throw new Error("expected diffs tool result details");
   }
   return details;
+}
+
+function extractViewerArtifactId(viewerPath: string): string {
+  let previousSegment: string | undefined;
+  let currentSegment: string | undefined;
+  for (const segment of viewerPath.split("/")) {
+    if (segment.length === 0) {
+      continue;
+    }
+    previousSegment = currentSegment;
+    currentSegment = segment;
+  }
+  if (!previousSegment) {
+    throw new Error(`Missing artifact id in viewer path: ${viewerPath}`);
+  }
+  return previousSegment;
 }
 
 function readParametersProperties(parameters: unknown): Record<string, unknown> {

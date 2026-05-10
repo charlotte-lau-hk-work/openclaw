@@ -27,8 +27,8 @@ vi.mock("openclaw/plugin-sdk/markdown-table-runtime", () => ({
   resolveMarkdownTableMode: mockState.resolveMarkdownTableMode,
 }));
 
-vi.mock("openclaw/plugin-sdk/text-runtime", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("openclaw/plugin-sdk/text-runtime")>();
+vi.mock("openclaw/plugin-sdk/text-chunking", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("openclaw/plugin-sdk/text-chunking")>();
   return {
     ...actual,
     convertMarkdownTables: mockState.convertMarkdownTables,
@@ -475,11 +475,12 @@ describe("editMessageMSTeams", () => {
 
     expect(result.conversationId).toBe("19:conversation@thread.tacv2");
     expect(mockContinueConversation).toHaveBeenCalledTimes(1);
-    expect(mockContinueConversation).toHaveBeenCalledWith(
-      "app-id",
+    const continueConversationCall = mockContinueConversation.mock.calls[0];
+    expect(continueConversationCall?.[0]).toBe("app-id");
+    expect(continueConversationCall?.[1]).toEqual(
       expect.objectContaining({ activityId: undefined }),
-      expect.any(Function),
     );
+    expect(typeof continueConversationCall?.[2]).toBe("function");
     expect(mockUpdateActivity).toHaveBeenCalledWith({
       type: "message",
       id: "activity-123",
@@ -527,11 +528,12 @@ describe("deleteMessageMSTeams", () => {
 
     expect(result.conversationId).toBe("19:conversation@thread.tacv2");
     expect(mockContinueConversation).toHaveBeenCalledTimes(1);
-    expect(mockContinueConversation).toHaveBeenCalledWith(
-      "app-id",
+    const continueConversationCall = mockContinueConversation.mock.calls[0];
+    expect(continueConversationCall?.[0]).toBe("app-id");
+    expect(continueConversationCall?.[1]).toEqual(
       expect.objectContaining({ activityId: undefined }),
-      expect.any(Function),
     );
+    expect(typeof continueConversationCall?.[2]).toBe("function");
     expect(mockDeleteActivity).toHaveBeenCalledWith("activity-456");
   });
 
