@@ -77,14 +77,14 @@ Top tools (schema size):
 
 ### `/context map`
 
-Sends an image generated from the same report as `/context list` and `/context detail`. Rectangle area is proportional to tracked prompt characters:
+Sends an image generated from the latest cached run report. Before a normal message has produced a run report in the session, `/context map` returns an unavailable message instead of rendering an estimate. Rectangle area is proportional to tracked prompt characters:
 
 - injected workspace files
 - base system prompt text
 - skill prompt entries
 - tool JSON schemas
 
-The caption shows whether the map came from the latest run-built report or from an on-demand estimate.
+`/context list`, `/context detail`, and `/context json` can still inspect an on-demand estimate when no run report is cached.
 
 ## What counts toward the context window
 
@@ -124,7 +124,7 @@ By default, OpenClaw injects a fixed set of workspace files (if present):
 
 Large files are truncated per-file using `agents.defaults.bootstrapMaxChars` (default `12000` chars). OpenClaw also enforces a total bootstrap injection cap across files with `agents.defaults.bootstrapTotalMaxChars` (default `60000` chars). `/context` shows **raw vs injected** sizes and whether truncation happened.
 
-When truncation occurs, the runtime can inject an in-prompt warning block under Project Context. Configure this with `agents.defaults.bootstrapPromptTruncationWarning` (`off`, `once`, `always`; default `once`).
+When truncation occurs, the runtime can inject an in-prompt warning block under Project Context. Configure this with `agents.defaults.bootstrapPromptTruncationWarning` (`off`, `once`, `always`; default `always`).
 
 ## Skills: injected vs loaded on-demand
 

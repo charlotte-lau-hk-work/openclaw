@@ -24,20 +24,34 @@ function requireSchemaProperty(
 
 describe("Slack message tools", () => {
   it("describes configured Slack message actions without loading channel runtime", () => {
-    expect(
-      describeSlackMessageTool({
-        cfg: {
-          channels: {
-            slack: {
-              botToken: "xoxb-test",
-            },
+    const discovery = describeSlackMessageTool({
+      cfg: {
+        channels: {
+          slack: {
+            botToken: "xoxb-test",
           },
         },
-      }),
-    ).toMatchObject({
-      actions: expect.arrayContaining(["send", "upload-file", "read"]),
-      capabilities: expect.arrayContaining(["presentation"]),
+      },
     });
+
+    expect(Object.keys(discovery).toSorted()).toEqual(["actions", "capabilities", "schema"]);
+    expect(discovery.actions).toEqual([
+      "send",
+      "react",
+      "reactions",
+      "read",
+      "edit",
+      "delete",
+      "download-file",
+      "upload-file",
+      "pin",
+      "unpin",
+      "list-pins",
+      "member-info",
+      "emoji-list",
+    ]);
+    expect(discovery.capabilities).toEqual(["presentation"]);
+    expect(Array.isArray(discovery.schema)).toBe(true);
   });
 
   it("honors account-scoped action gates", () => {
@@ -75,9 +89,21 @@ describe("Slack message tools", () => {
       },
     } as OpenClawConfig;
 
-    expect(listSlackMessageActions(cfg)).toEqual(
-      expect.arrayContaining(["read", "edit", "delete", "download-file", "upload-file"]),
-    );
+    expect(listSlackMessageActions(cfg)).toEqual([
+      "send",
+      "react",
+      "reactions",
+      "read",
+      "edit",
+      "delete",
+      "download-file",
+      "upload-file",
+      "pin",
+      "unpin",
+      "list-pins",
+      "member-info",
+      "emoji-list",
+    ]);
   });
 
   it("honors the selected Slack account during discovery", () => {
@@ -191,6 +217,25 @@ describe("Slack message tools", () => {
     expect(property.description).toContain("Not supported for media or upload-file");
   });
 
+  it("describes Slack top-level sends as a same-channel thread opt-out", () => {
+    const discovery = describeSlackMessageTool({
+      cfg: {
+        channels: {
+          slack: {
+            botToken: "xoxb-test",
+          },
+        },
+      },
+    });
+
+    const { schema, property } = requireSchemaProperty(discovery, "topLevel");
+
+    expect(schema.actions).toEqual(["send"]);
+    expect(property.description).toContain('action="send"');
+    expect(property.description).toContain("parent-channel");
+    expect(property.description).toContain("threadId: null");
+  });
+
   it("omits Slack file and message id schemas when those actions are disabled", () => {
     const discovery = describeSlackMessageTool({
       cfg: {
@@ -215,8 +260,9 @@ describe("Slack message tools", () => {
       : discovery.schema
         ? [discovery.schema]
         : [];
-    expect(schemas.some((entry) => "fileId" in entry.properties)).toBe(false);
-    expect(schemas.some((entry) => "messageId" in entry.properties)).toBe(false);
-    expect(schemas.some((entry) => "replyBroadcast" in entry.properties)).toBe(true);
+    const propertyNames = schemas.flatMap((entry) => Object.keys(entry.properties));
+    expect(propertyNames).not.toContain("fileId");
+    expect(propertyNames).not.toContain("messageId");
+    expect(propertyNames).toContain("replyBroadcast");
   });
 });

@@ -85,8 +85,17 @@ function requirePayload(payloads: readonly ReplyPayload[], index: number): Reply
   return payload;
 }
 
+function lastMockArg(mock: { mock: { calls: Array<Array<unknown>> } }, label: string): unknown {
+  const calls = mock.mock.calls;
+  const call = calls[calls.length - 1];
+  if (!call) {
+    throw new Error(`expected ${label}`);
+  }
+  return call[0];
+}
+
 function latestNormalizerOptions(): MediaNormalizerOptions {
-  const options = createReplyMediaPathNormalizerMock.mock.calls.at(-1)?.[0];
+  const options = lastMockArg(createReplyMediaPathNormalizerMock, "media normalizer options");
   if (!options || typeof options !== "object") {
     throw new Error("expected media normalizer options");
   }
@@ -94,15 +103,69 @@ function latestNormalizerOptions(): MediaNormalizerOptions {
 }
 
 function latestOutboundDeliveryArgs(): {
+  channel?: string;
+  to?: string;
+  accountId?: string;
   payloads: ReplyPayload[];
   bestEffort?: boolean;
   queuePolicy?: string;
 } {
-  const args = deliverOutboundPayloadsMock.mock.calls.at(-1)?.[0];
+  const args = lastMockArg(deliverOutboundPayloadsMock, "outbound delivery arguments");
   if (!args || typeof args !== "object") {
     throw new Error("expected outbound delivery arguments");
   }
-  return args as { payloads: ReplyPayload[]; bestEffort?: boolean; queuePolicy?: string };
+  return args as {
+    channel?: string;
+    to?: string;
+    accountId?: string;
+    payloads: ReplyPayload[];
+    bestEffort?: boolean;
+    queuePolicy?: string;
+  };
+}
+
+type DeliveryStatusLike = {
+  requested?: unknown;
+  attempted?: unknown;
+  status?: unknown;
+  succeeded?: unknown;
+  reason?: unknown;
+  error?: unknown;
+  errorMessage?: unknown;
+  resultCount?: unknown;
+  sentBeforeError?: unknown;
+  payloadOutcomes?: Array<Record<string, unknown>>;
+};
+
+function deliveryStatus(delivered: { deliveryStatus?: unknown }): DeliveryStatusLike {
+  return (delivered.deliveryStatus ?? {}) as DeliveryStatusLike;
+}
+
+function expectDeliveryStatusFields(
+  delivered: { deliveryStatus?: unknown },
+  expected: Record<string, unknown>,
+) {
+  const status = deliveryStatus(delivered);
+  for (const [key, value] of Object.entries(expected)) {
+    expect(status[key as keyof DeliveryStatusLike], key).toEqual(value);
+  }
+  return status;
+}
+
+function expectRuntimeErrorIncludes(
+  runtime: { error: { mock: { calls: Array<Array<unknown>> } } },
+  text: string,
+) {
+  const errorOutput = runtime.error.mock.calls.map(([message]) => String(message)).join("\n");
+  expect(errorOutput).toContain(text);
+}
+
+function latestJsonOutput(runtime: { writeJson: { mock: { calls: Array<Array<unknown>> } } }) {
+  const output = lastMockArg(runtime.writeJson, "JSON output");
+  if (!output || typeof output !== "object") {
+    throw new Error("expected JSON output");
+  }
+  return output as { deliveryStatus?: DeliveryStatusLike };
 }
 
 async function deliverMediaReplyForTest(
@@ -249,7 +312,7 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     expect(normalizerOptions.workspaceDir).toBe("/tmp/agent-workspace");
     expect(normalizerOptions.messageProvider).toBe("slack");
 
-    const normalizedInput = normalizerFn.mock.calls.at(0)?.[0];
+    const normalizedInput = normalizerFn.mock.calls[0]?.[0];
     expect(normalizedInput?.mediaUrls).toStrictEqual(["./out/photo.png"]);
     expect(deliverOutboundPayloadsMock).toHaveBeenCalledTimes(1);
     const deliverArgs = latestOutboundDeliveryArgs();
@@ -267,12 +330,122 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     } as never);
 
     expect(delivered.deliverySucceeded).toBe(true);
-    expect(delivered.deliveryStatus).toMatchObject({
+    expectDeliveryStatusFields(delivered, {
       requested: true,
       attempted: true,
       status: "suppressed",
       succeeded: true,
       reason: "no_visible_result",
+    });
+  });
+
+  it("refreshes stale implicit session routing before final delivery", async () => {
+    deliverOutboundPayloadsMock.mockResolvedValue([{ channel: "slack", messageId: "msg-1" }]);
+    const runtime = { log: vi.fn(), error: vi.fn() };
+    const resolveFreshSessionEntryForDelivery = vi.fn(async () => ({
+      sessionId: "session-1",
+      updatedAt: 2,
+      deliveryContext: {
+        channel: "slack",
+        to: "#fresh",
+        accountId: "workspace-1",
+      },
+    }));
+
+    const delivered = await deliverAgentCommandResult({
+      cfg: {
+        agents: {
+          list: [{ id: "tester", workspace: "/tmp/agent-workspace" }],
+        },
+      } as OpenClawConfig,
+      deps: {} as CliDeps,
+      runtime: runtime as never,
+      opts: {
+        message: "go",
+        deliver: true,
+        bestEffortDeliver: true,
+        sessionKey: "agent:tester:main",
+      } as AgentCommandOpts,
+      outboundSession: {
+        key: "agent:tester:main",
+        agentId: "tester",
+      } as never,
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+      },
+      expectedSessionIdForFreshDelivery: "session-1",
+      resolveFreshSessionEntryForDelivery,
+      payloads: [{ text: "final answer" }],
+      result: createResult(),
+    });
+
+    expect(resolveFreshSessionEntryForDelivery).toHaveBeenCalledTimes(1);
+    expect(deliverOutboundPayloadsMock).toHaveBeenCalledTimes(1);
+    const deliverArgs = latestOutboundDeliveryArgs();
+    expect(deliverArgs.channel).toBe("slack");
+    expect(deliverArgs.to).toBe("#fresh");
+    expect(deliverArgs.accountId).toBe("workspace-1");
+    expect(delivered.deliverySucceeded).toBe(true);
+    expectDeliveryStatusFields(delivered, {
+      requested: true,
+      attempted: true,
+      status: "sent",
+      succeeded: true,
+      resultCount: 1,
+    });
+  });
+
+  it("does not refresh final delivery routing from a different logical session", async () => {
+    deliverOutboundPayloadsMock.mockResolvedValue([{ channel: "slack", messageId: "msg-1" }]);
+    const runtime = { log: vi.fn(), error: vi.fn() };
+    const resolveFreshSessionEntryForDelivery = vi.fn(async () => ({
+      sessionId: "session-2",
+      updatedAt: 2,
+      deliveryContext: {
+        channel: "slack",
+        to: "#fresh",
+        accountId: "workspace-1",
+      },
+    }));
+
+    const delivered = await deliverAgentCommandResult({
+      cfg: {
+        agents: {
+          list: [{ id: "tester", workspace: "/tmp/agent-workspace" }],
+        },
+      } as OpenClawConfig,
+      deps: {} as CliDeps,
+      runtime: runtime as never,
+      opts: {
+        message: "go",
+        deliver: true,
+        bestEffortDeliver: true,
+        sessionKey: "agent:tester:main",
+      } as AgentCommandOpts,
+      outboundSession: {
+        key: "agent:tester:main",
+        agentId: "tester",
+      } as never,
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+      },
+      expectedSessionIdForFreshDelivery: "session-1",
+      resolveFreshSessionEntryForDelivery,
+      payloads: [{ text: "final answer" }],
+      result: createResult(),
+    });
+
+    expect(resolveFreshSessionEntryForDelivery).toHaveBeenCalledTimes(1);
+    expect(deliverOutboundPayloadsMock).not.toHaveBeenCalled();
+    expect(delivered.deliverySucceeded).toBe(false);
+    expectDeliveryStatusFields(delivered, {
+      requested: true,
+      attempted: false,
+      status: "failed",
+      succeeded: false,
+      reason: "channel_resolved_to_internal",
     });
   });
 
@@ -336,14 +509,14 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     });
 
     expect(delivered.deliverySucceeded).toBe(false);
-    expect(delivered.deliveryStatus).toMatchObject({
+    expectDeliveryStatusFields(delivered, {
       requested: true,
       attempted: true,
       status: "failed",
       succeeded: false,
       error: true,
     });
-    expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("send failed"));
+    expectRuntimeErrorIncludes(runtime, "send failed");
     const deliverArgs = latestOutboundDeliveryArgs();
     expect(deliverArgs.bestEffort).toBe(true);
     expect(deliverArgs.queuePolicy).toBe("best_effort");
@@ -471,18 +644,14 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     });
 
     expect(runtime.writeJson).toHaveBeenCalledTimes(1);
-    expect(runtime.writeJson).toHaveBeenCalledWith(
-      expect.objectContaining({
-        deliveryStatus: {
-          requested: true,
-          attempted: true,
-          status: "sent",
-          succeeded: true,
-          resultCount: 1,
-        },
-      }),
-      2,
-    );
+    const json = latestJsonOutput(runtime);
+    expect(json.deliveryStatus).toEqual({
+      requested: true,
+      attempted: true,
+      status: "sent",
+      succeeded: true,
+      resultCount: 1,
+    });
     expect(delivered.deliverySucceeded).toBe(true);
     expect(delivered.deliveryStatus?.status).toBe("sent");
   });
@@ -513,21 +682,21 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     } as never);
 
     expect(delivered.deliverySucceeded).toBe(true);
-    expect(delivered.deliveryStatus).toMatchObject({
+    const status = expectDeliveryStatusFields(delivered, {
       requested: true,
       attempted: true,
       status: "suppressed",
       succeeded: true,
       reason: "cancelled_by_message_sending_hook",
-      payloadOutcomes: [
-        {
-          index: 0,
-          status: "suppressed",
-          reason: "cancelled_by_message_sending_hook",
-          hookEffect: { cancelReason: "owned-by-other-agent" },
-        },
-      ],
     });
+    expect(status.payloadOutcomes).toEqual([
+      {
+        index: 0,
+        status: "suppressed",
+        reason: "cancelled_by_message_sending_hook",
+        hookEffect: { cancelReason: "owned-by-other-agent" },
+      },
+    ]);
   });
 
   it("surfaces durable partial failures without clearing delivery retry state", async () => {
@@ -561,25 +730,23 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     );
 
     expect(delivered.deliverySucceeded).toBe(false);
-    expect(delivered.deliveryStatus).toMatchObject({
+    const status = expectDeliveryStatusFields(delivered, {
       requested: true,
       attempted: true,
       status: "partial_failed",
       succeeded: "partial",
       error: true,
-      errorMessage: expect.stringContaining("second chunk failed"),
       resultCount: 1,
       sentBeforeError: true,
-      payloadOutcomes: [
-        {
-          index: 1,
-          status: "failed",
-          error: expect.stringContaining("second chunk failed"),
-          sentBeforeError: true,
-          stage: "platform_send",
-        },
-      ],
     });
+    expect(String(status.errorMessage)).toContain("second chunk failed");
+    expect(status.payloadOutcomes).toHaveLength(1);
+    const outcome = status.payloadOutcomes?.[0];
+    expect(outcome?.index).toBe(1);
+    expect(outcome?.status).toBe("failed");
+    expect(String(outcome?.error)).toContain("second chunk failed");
+    expect(outcome?.sentBeforeError).toBe(true);
+    expect(outcome?.stage).toBe("platform_send");
   });
 
   it("marks no-payload deliveryStatus as terminal delivery success", async () => {
@@ -600,7 +767,7 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     });
 
     expect(delivered.deliverySucceeded).toBe(true);
-    expect(delivered.deliveryStatus).toMatchObject({
+    expectDeliveryStatusFields(delivered, {
       requested: true,
       attempted: false,
       status: "suppressed",
@@ -629,7 +796,7 @@ describe("normalizeAgentCommandReplyPayloads", () => {
 
     expect(delivered.payloads).toEqual([]);
     expect(delivered.deliverySucceeded).toBe(true);
-    expect(delivered.deliveryStatus).toMatchObject({
+    expectDeliveryStatusFields(delivered, {
       requested: true,
       attempted: false,
       status: "suppressed",
@@ -660,7 +827,7 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     });
 
     expect(delivered.deliverySucceeded).toBeUndefined();
-    expect(delivered.deliveryStatus).toMatchObject({
+    expectDeliveryStatusFields(delivered, {
       requested: true,
       attempted: false,
       status: "failed",
@@ -668,7 +835,7 @@ describe("normalizeAgentCommandReplyPayloads", () => {
       error: true,
       reason: "unknown_channel",
     });
-    expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("Unknown channel"));
+    expectRuntimeErrorIncludes(runtime, "Unknown channel");
     expect(deliverOutboundPayloadsMock).not.toHaveBeenCalled();
   });
 
@@ -709,19 +876,13 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     ).rejects.toThrow("Slack API timeout");
 
     expect(runtime.writeJson).toHaveBeenCalledTimes(1);
-    expect(runtime.writeJson).toHaveBeenCalledWith(
-      expect.objectContaining({
-        deliveryStatus: {
-          requested: true,
-          attempted: true,
-          status: "failed",
-          succeeded: false,
-          error: true,
-          errorMessage: expect.stringContaining("Slack API timeout"),
-        },
-      }),
-      2,
-    );
+    const json = latestJsonOutput(runtime);
+    expect(json.deliveryStatus?.requested).toBe(true);
+    expect(json.deliveryStatus?.attempted).toBe(true);
+    expect(json.deliveryStatus?.status).toBe("failed");
+    expect(json.deliveryStatus?.succeeded).toBe(false);
+    expect(json.deliveryStatus?.error).toBe(true);
+    expect(String(json.deliveryStatus?.errorMessage)).toContain("Slack API timeout");
   });
 
   it("emits JSON deliveryStatus before strict preflight failures rethrow", async () => {
@@ -763,18 +924,14 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     expect(deliverOutboundPayloadsMock).not.toHaveBeenCalled();
     expect(createReplyMediaPathNormalizerMock).not.toHaveBeenCalled();
     expect(runtime.writeJson).toHaveBeenCalledTimes(1);
-    expect(runtime.writeJson).toHaveBeenCalledWith(
-      expect.objectContaining({
-        deliveryStatus: {
-          requested: true,
-          attempted: false,
-          status: "failed",
-          succeeded: false,
-          error: true,
-          reason: "unknown_channel",
-        },
-      }),
-      2,
-    );
+    const json = latestJsonOutput(runtime);
+    expect(json.deliveryStatus).toEqual({
+      requested: true,
+      attempted: false,
+      status: "failed",
+      succeeded: false,
+      error: true,
+      reason: "unknown_channel",
+    });
   });
 });
